@@ -10,19 +10,19 @@ import (
 	"os"
 	"strings"
 
-	"GoTools/src/helpers"
-	"github.com/tealeg/xlsx"
+	. "GoTools/src/helpers"
+	"github.com/xuri/excelize/v2"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
 
-type Column struct {
+type DataColumn struct {
 	XMLName xml.Name
 	Value   string `xml:",chardata"`
 }
 
 type DataRow struct {
-	Columns []Column `xml:",any"`
+	Columns []DataColumn `xml:",any"`
 }
 
 type DataTable struct {
@@ -59,40 +59,40 @@ func getInput() (filePath string, sheetName string, inputErr error) {
 }
 
 func main() {
-	processingErr := helpers.ErrMsg{Code: helpers.Success}
+	processingErr := ErrMsg{Code: Success}
 	defer func() {
 		processingErr.Exit()
 	}()
 	filePath, sheetName, inputErr := getInput()
 	// Get user input
 	if inputErr != nil {
-		processingErr = helpers.ErrMsg{Err: inputErr, Code: helpers.ErrStdin}
+		processingErr = ErrMsg{Err: inputErr, Code: ErrStdin}
 	}
 	// Validate user input
 	if len(filePath) < 1 {
-		processingErr = helpers.ErrMsg{Code: helpers.ErrNoInput}
+		processingErr = ErrMsg{Code: ErrNoInput}
 	}
 	// Validate file path
-	exists, pathErr := helpers.PathExists(filePath)
+	exists, pathErr := PathExists(filePath)
 	if pathErr != nil || !exists {
-		processingErr = helpers.ErrMsg{Err: pathErr, Code: helpers.ErrNoFile}
+		processingErr = ErrMsg{Err: pathErr, Code: ErrNoFile}
 	}
 	// Validate file type
 	if !isXlsxFile(filePath) {
-		processingErr = helpers.ErrMsg{
+		processingErr = ErrMsg{
 			Err:  errors.New("invalid file type"),
-			Code: helpers.ErrInvalidFileType,
+			Code: ErrInvalidFileType,
 		}
 	}
 	// Parse the file as XML
 	output, parseErr := parseXlsxFile(filePath, sheetName)
 	if parseErr != nil {
-		processingErr = helpers.ErrMsg{Err: parseErr, Code: helpers.ErrParse}
+		processingErr = ErrMsg{Err: parseErr, Code: ErrParse}
 	} else {
 		// Write the output to stdout
 		_, writeErr := os.Stdout.Write(output)
 		if writeErr != nil {
-			processingErr = helpers.ErrMsg{Err: writeErr, Code: helpers.ErrStdout}
+			processingErr = ErrMsg{Err: writeErr, Code: ErrStdout}
 		}
 	}
 }
@@ -101,76 +101,71 @@ func main() {
 // It adds a dot to the beginning of the extension if it's missing.
 // Returns true if the file extension matches the specified extension, and false otherwise.
 func isXlsxFile(path string) bool {
-	return helpers.CheckExtension(path, ".xlsx")
+	return CheckExtension(path, ".xlsx")
 }
 
-// parseXlsxFile uses the xlsx package to parse an .xlsx file and extract data from a specified sheet.
-// It returns the parsed data as an XML-encoded byte slice and any encountered errors.
-// The path parameter specifies the path to the .xlsx file to parse.
-// The targetSheet parameter specifies the name of the target sheet to parse. If no target sheet is provided,
-// the function will use the first sheet in the file.
-// The function assumes that the schema (column headers) is located in the first row of the target sheet.
-// It cleans the column headers by removing spaces and replacing invalid characters with valid XML element names.
-// The function loads the data row by row, skipping the first row (schema) and populates a DataTable struct.
-// Finally, it marshals the DataTable struct into XML format and returns the byte slice representation.
-// If any errors occur during the parsing or marshaling process, an error will be returned.
-// Example usage:
-//
-//		 filePath := "C:/temp/Config.xlsx"
-//	  sheetName := "Sheet1"
-//	  output, parseErr := parseXlsxFile(filePath, sheetName)
-//	  if parseErr == nil {
-//		   // Write the output to stdout
-//		   _, writeErr := os.Stdout.Write(output)
-//		   if writeErr != nil {
-//			   fmt.Println("Error writing output:", writeErr)
-//		   }
-//	  } else {
-//		   fmt.Println("Error parsing .xlsx file:", parseErr)
-//	  }
-func parseXlsxFile(path string, targetSheet string) ([]byte, error) {
+func parseXlsxFile(path, targetSheet string) ([]byte, error) {
 	// Open the .xlsx file
-	file, openFileErr := xlsx.OpenFile(path)
+	file, openFileErr := excelize.OpenFile(path)
 	if openFileErr != nil {
 		return nil, openFileErr
 	}
-	var dataTable DataTable
+	defer func(file *excelize.File) {
+		err := file.Close()
+		if err != nil {
+			return
+		}
+	}(file)
 	// Get the target sheet, or the default if no target was provided
-	var sheet *xlsx.Sheet
+	var rows [][]string
+	var getRowsErr error
 	if len(targetSheet) > 1 {
-		sheet = file.Sheet[targetSheet]
+		rows, getRowsErr = file.GetRows(targetSheet)
 	} else {
-		sheet = file.Sheets[0]
+		rows, getRowsErr = file.GetRows(file.GetSheetName(0))
 	}
-	// Get the schema (assuming it is in the first row)
-	var schema []string
-	// Load schema, cleaning column headers
-	for _, cell := range sheet.Rows[0].Cells {
-		// String manipulation for making it a valid XML element name
-		columnName := cell.String()
-		if strings.ContainsAny(columnName, " ") {
-			columnName = cases.Title(language.English).String(columnName)
-			columnName = strings.ReplaceAll(columnName, " ", "")
-		}
-		columnName = strings.ReplaceAll(columnName, "?", "")
-		schema = append(schema, columnName)
+	if getRowsErr != nil {
+		return nil, getRowsErr
 	}
-	// Load data
-	for rowIndex, row := range sheet.Rows {
-		if rowIndex == 0 { // Skip first (schema) row
-			continue
-		}
-		var dataRow DataRow
-		for columnIndex, cell := range row.Cells {
-			columnName := schema[columnIndex]
-			column := Column{XMLName: xml.Name{Local: columnName}, Value: cell.String()}
-			dataRow.Columns = append(dataRow.Columns, column)
-		}
-		dataTable.Rows = append(dataTable.Rows, dataRow)
-	}
-	output, marshalErr := xml.MarshalIndent(dataTable, "", "  ")
+	// Marshal the data into XML
+	output, marshalErr := xml.MarshalIndent(buildDataTable(&rows), "", "  ")
 	if marshalErr != nil {
 		return nil, marshalErr
 	}
 	return output, nil
+}
+
+func cleanHeader(header *string) {
+	newHeader := *header
+	if strings.ContainsAny(*header, " ") {
+		newHeader = cases.Title(language.English).String(newHeader)
+	}
+	newHeader = FixXMLTags(newHeader)
+	*header = newHeader
+}
+
+// buildDataTable builds a DataTable from a 2D slice of strings.
+// It skips the first row (schema row) and cleans the header row by removing spaces and special characters.
+// Each remaining row is converted into a DataRow, where each column value is mapped to a DataColumn in the DataRow.
+// The resulting DataTable is returned.
+func buildDataTable(rows *[][]string) DataTable {
+	var dataTable DataTable
+	for rowIndex := range *rows {
+		if rowIndex == 0 {
+			headerRow := RenameDuplicates((*rows)[0])
+			for headerIndex := range headerRow {
+				cleanHeader(&headerRow[headerIndex])
+			}
+		} else {
+			var dataRow DataRow
+			for columnIndex := range (*rows)[rowIndex] {
+				columnName := (*rows)[0][columnIndex]
+				columnValue := (*rows)[rowIndex][columnIndex]
+				column := DataColumn{XMLName: xml.Name{Local: columnName}, Value: columnValue}
+				dataRow.Columns = append(dataRow.Columns, column)
+			}
+			dataTable.Rows = append(dataTable.Rows, dataRow)
+		}
+	}
+	return dataTable
 }
