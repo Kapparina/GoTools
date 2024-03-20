@@ -104,7 +104,7 @@ func isXlsxFile(path string) bool {
 	return CheckExtension(path, ".xlsx")
 }
 
-func parseXlsxFile(path, targetSheet string) ([]byte, error) {
+func parseXlsxFile(path, targetSheet string) (output []byte, parseErr error) {
 	// Open the .xlsx file
 	file, openFileErr := excelize.OpenFile(path)
 	if openFileErr != nil {
@@ -113,7 +113,7 @@ func parseXlsxFile(path, targetSheet string) ([]byte, error) {
 	defer func(file *excelize.File) {
 		err := file.Close()
 		if err != nil {
-			return
+			parseErr = err
 		}
 	}(file)
 	// Get the target sheet, or the default if no target was provided
@@ -128,9 +128,11 @@ func parseXlsxFile(path, targetSheet string) ([]byte, error) {
 		return nil, getRowsErr
 	}
 	// Marshal the data into XML
-	output, marshalErr := xml.MarshalIndent(buildDataTable(&rows), "", "  ")
+	xmlOutput, marshalErr := xml.MarshalIndent(buildDataTable(&rows), "", "  ")
 	if marshalErr != nil {
 		return nil, marshalErr
+	} else {
+		output = xmlOutput
 	}
 	return output, nil
 }
@@ -150,6 +152,9 @@ func cleanHeader(header *string) {
 // The resulting DataTable is returned.
 func buildDataTable(rows *[][]string) DataTable {
 	var dataTable DataTable
+	if rows == nil {
+		return dataTable
+	}
 	for rowIndex := range *rows {
 		if rowIndex == 0 {
 			headerRow := RenameDuplicates((*rows)[0])
