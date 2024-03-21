@@ -38,15 +38,24 @@ func MoveFile(src, dst string) (err error) {
 	// Create new file.
 	newFile, err := os.Create(dst)
 	if err != nil {
-		originalFile.Close()
+		err := originalFile.Close()
+		if err != nil {
+			return err
+		}
 		return err
 	}
 
 	// Copy the bytes to destination from source.
 	_, err = io.Copy(newFile, originalFile)
 	if err != nil {
-		newFile.Close()
-		originalFile.Close()
+		err := newFile.Close()
+		if err != nil {
+			return err
+		}
+		err = originalFile.Close()
+		if err != nil {
+			return err
+		}
 		return err
 	}
 
