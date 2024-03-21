@@ -9,6 +9,8 @@ const (
 	Success = iota
 	ErrReadFile
 	ErrWriteFile
+	ErrReadWrite
+	ErrMoveFile
 	ErrStdin
 	ErrStdout
 	ErrNoInput

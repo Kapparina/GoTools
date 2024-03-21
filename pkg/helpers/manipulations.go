@@ -2,6 +2,7 @@ package helpers
 
 import (
 	"fmt"
+	"log"
 	"strings"
 )
 
@@ -29,7 +30,7 @@ import (
 //
 //	The modifiedHeaders slice will be:
 //	[]string{"Name", "Age", "Name_2", "City", "Age_2"}
-func RenameDuplicates(input []string) []string {
+func RenameDuplicates(input []string, printOffending bool) []string {
 	counts := make(map[string]int)
 
 	for i, header := range input {
@@ -38,9 +39,11 @@ func RenameDuplicates(input []string) []string {
 			input[i] = fmt.Sprintf("%s_%d", header, counts[header])
 		}
 	}
-	for header, count := range counts {
-		if count > 1 {
-			fmt.Printf("Header '%s' was present %d times\n", header, count)
+	if printOffending {
+		for header, count := range counts {
+			if count > 1 {
+				log.Printf("Header '%s' was present %d times\n", header, count)
+			}
 		}
 	}
 	return input
@@ -78,5 +81,6 @@ func FixXMLTags(tag string) string {
 	for _, char := range invalidXmlChars {
 		cleanTag = strings.ReplaceAll(cleanTag, string(char), "")
 	}
+	cleanTag = strings.ReplaceAll(cleanTag, " ", "_x0020_")
 	return cleanTag
 }

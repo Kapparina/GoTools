@@ -1,6 +1,8 @@
 package helpers
 
 import (
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,4 +26,46 @@ func CheckExtension(path string, extension string) bool {
 		extension = "." + extension
 	}
 	return filepath.Ext(path) == strings.ToLower(extension)
+}
+
+func MoveFile(src, dst string) (err error) {
+	// Open original file.
+	originalFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+
+	// Create new file.
+	newFile, err := os.Create(dst)
+	if err != nil {
+		originalFile.Close()
+		return err
+	}
+
+	// Copy the bytes to destination from source.
+	_, err = io.Copy(newFile, originalFile)
+	if err != nil {
+		newFile.Close()
+		originalFile.Close()
+		return err
+	}
+
+	// Closes files
+	err = newFile.Close()
+	if err != nil {
+		log.Printf("Failed to close new file: %v", err)
+	}
+
+	err = originalFile.Close()
+	if err != nil {
+		log.Printf("Failed to close original file: %v", err)
+	}
+
+	// Remove original file.
+	err = os.Remove(src)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
