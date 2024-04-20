@@ -9,6 +9,7 @@ import (
 	"flag"
 	"os"
 	"strings"
+	"time"
 
 	. "GoTools/pkg/helpers"
 	"github.com/xuri/excelize/v2"
@@ -93,6 +94,20 @@ func main() {
 			processingErr = ErrMsg{Err: writeErr, Code: ErrStdout}
 		}
 	}
+	// // write output to xml file
+	// xmlFile, xmlFileErr := os.Create("output.xml")
+	// if xmlFileErr != nil {
+	//     processingErr = ErrMsg{Err: xmlFileErr, Code: ErrWriteFile}
+	// }
+	// defer func() {
+	//     if err := xmlFile.Close(); err != nil {
+	//         processingErr = ErrMsg{Err: err, Code: ErrWriteFile}
+	//     }
+	// }()
+	// _, writeErr := xmlFile.Write(output)
+	// if writeErr != nil {
+	//     processingErr = ErrMsg{Err: writeErr, Code: ErrWriteFile}
+	// }
 }
 
 // CheckExtension checks if the given file path has the specified extension.
@@ -163,7 +178,7 @@ func buildDataTable(rows *[][]string) DataTable {
 			var dataRow DataRow
 			for columnIndex := range (*rows)[rowIndex] {
 				columnName := (*rows)[0][columnIndex]
-				columnValue := (*rows)[rowIndex][columnIndex]
+				columnValue := convertToISO8601((*rows)[rowIndex][columnIndex])
 				column := DataColumn{XMLName: xml.Name{Local: columnName}, Value: columnValue}
 				dataRow.Columns = append(dataRow.Columns, column)
 			}
@@ -171,4 +186,25 @@ func buildDataTable(rows *[][]string) DataTable {
 		}
 	}
 	return dataTable
+}
+
+func convertToISO8601(value string) string {
+	formats := [9]string{
+		"01-02-06",
+		"01-02-06 15:04",
+		"01-02-06 15:04:05",
+		"1/02/06",
+		"1/02/06 15:04",
+		"1/02/06 15:04:05",
+		"01/02/06",
+		"01/02/06 15:04",
+		"01/02/06 15:04:05",
+	}
+	for _, format := range formats {
+		parsedDate, parseErr := time.Parse(format, value)
+		if parseErr == nil {
+			return parsedDate.Format(time.DateTime)
+		}
+	}
+	return value
 }
