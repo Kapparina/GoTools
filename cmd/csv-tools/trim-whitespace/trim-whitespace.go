@@ -14,7 +14,6 @@ import (
 	"github.com/charmbracelet/log"
 )
 
-// main is the entry point of the program.
 func main() {
 	log.SetLevel(log.DebugLevel)
 	startTime := time.Now()
@@ -23,7 +22,8 @@ func main() {
 	defer func() {
 		log.Debug(
 			"DONE!",
-			"time", time.Since(startTime),
+			"time",
+			time.Since(startTime),
 		)
 		processingErr.Exit()
 	}()
@@ -49,6 +49,7 @@ func main() {
 }
 
 func processCSV(path string) ErrMsg {
+
 	if exists, _ := PathExists(path); !exists {
 		return ErrMsg{Err: fmt.Errorf("file '%s' does not exist", path), Code: ErrNoFile}
 	}
@@ -114,18 +115,19 @@ func readWriteCsv(path string) (string, error) {
 	lineCount := 0
 	for {
 		record, err := reader.Read()
+		newRecord := make([]string, len(record))
 		if err != nil {
 			break
 		}
-		if lineCount == 0 {
-			record = RenameDuplicates(record, true)
+		for i, field := range record {
+			newRecord[i] = strings.TrimSpace(field)
 		}
-		writeErr := writer.Write(record)
+		writeErr := writer.Write(newRecord)
 		if writeErr != nil {
 			return tempCsv.Name(), writeErr
 		}
 		lineCount++
 	}
-	log.Info("Renamed duplicate columns successfully")
+	log.Info("Trimmed whitespace successfully", "file", tempCsv.Name(), "lines", lineCount)
 	return tempCsv.Name(), nil
 }
