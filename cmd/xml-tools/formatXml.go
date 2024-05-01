@@ -1,16 +1,24 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/xml"
+	"errors"
 	"flag"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/log"
+)
+
+var (
+	verbose bool
+	dirPath string
 )
 
 type TargetFile struct {
@@ -18,90 +26,139 @@ type TargetFile struct {
 	Err  error
 }
 
-func formatXmlFile(target *TargetFile, errChan chan<- *TargetFile, wg *sync.WaitGroup) {
-	defer wg.Done()
+func handleError(target *TargetFile, err error, errChan chan<- *TargetFile) {
+	target.Err = err
+	errChan <- target
+}
 
-	reader, openErr := os.Open(target.Path)
-	if openErr != nil {
-		target.Err = openErr
-		errChan <- target
-		return
-	}
-	defer func(reader *os.File) {
-		err := reader.Close()
-		if err != nil {
-			target.Err = err
-			errChan <- target
-			return
-		}
-	}(reader)
+func getXmlEncoderDecoder(file *os.File) (*xml.Encoder, *xml.Decoder, *bytes.Buffer) {
+	// Create a new buffered reader from the file
+	reader := bufio.NewReader(file)
 
 	var buf bytes.Buffer
 	encoder := xml.NewEncoder(&buf)
 	encoder.Indent(" ", "\t")
 
 	decoder := xml.NewDecoder(reader)
+
+	return encoder, decoder, &buf
+}
+
+func formatXmlFile(target *TargetFile, errChan chan<- *TargetFile, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	file, err := os.Open(target.Path)
+	if err != nil {
+		handleError(target, err, errChan)
+		return
+	}
+
+	defer func() {
+		if err := file.Close(); err != nil {
+			handleError(target, err, errChan)
+		}
+	}()
+
+	encoder, decoder, buf := getXmlEncoderDecoder(file)
+
 	for {
 		t, err := decoder.Token()
 		if err != nil {
 			if err == io.EOF {
 				break
-			} else {
-				target.Err = err
-				errChan <- target
-				return
 			}
+			handleError(target, err, errChan)
+			return
 		}
 		if t == nil {
 			break
 		}
-		err = encoder.EncodeToken(t)
-		if err != nil {
-			target.Err = err
-			errChan <- target
+		if err := encoder.EncodeToken(t); err != nil {
+			handleError(target, err, errChan)
 			return
 		}
 	}
+
 	if err := encoder.Flush(); err != nil {
-		target.Err = err
-		errChan <- target
+		handleError(target, err, errChan)
 		return
 	}
 
-	if err := os.WriteFile(target.Path, buf.Bytes(), 0644); err != nil {
-		target.Err = err
-		errChan <- target
+	outFile, err := os.Create(target.Path)
+	if err != nil {
+		handleError(target, err, errChan)
 		return
 	}
+
+	defer func(outFile *os.File) {
+		if err := outFile.Close(); err != nil {
+			handleError(target, err, errChan)
+		}
+	}(outFile)
+
+	writer := bufio.NewWriter(outFile)
+	if _, err = writer.Write(buf.Bytes()); err != nil {
+		handleError(target, err, errChan)
+		return
+	}
+
+	if err = writer.Flush(); err != nil {
+		handleError(target, err, errChan)
+		return
+	}
+
 	errChan <- target
-	return
 }
 
-func main() {
-	var dirPath string
-	var xmlFiles []TargetFile
-
+func parseArgs() error {
 	flag.StringVar(&dirPath, "path", "", "Path to directory containing XML files")
+	flag.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
 	flag.Parse()
 
+	if verbose {
+		log.SetLevel(log.DebugLevel)
+		log.SetCallerFormatter(log.LongCallerFormatter)
+		log.SetReportCaller(true)
+	}
 	if len(dirPath) == 0 {
 		log.Error("Enter either an absolute path to a directory or a specific XML file")
 		flag.Usage()
-		os.Exit(1)
+		return errors.New("no path provided")
+	}
+	return nil
+}
+
+func main() {
+	defer func(startTime time.Time) {
+		log.Debug("TIME!", "execution time", time.Since(startTime))
+	}(time.Now())
+
+	if argErr := parseArgs(); argErr != nil {
+		log.Error(argErr)
+		return
+	}
+	xmlFiles, dirErr := prepareXMLFiles()
+	if dirErr != nil {
+		log.Error(dirErr)
+		return
 	}
 
+	processFilesConcurrently(xmlFiles)
+}
+
+func prepareXMLFiles() ([]TargetFile, error) {
+	var xmlFiles []TargetFile
 	dirInfo, dirErr := os.Stat(dirPath)
 	if dirErr != nil {
-		log.Fatal(dirErr)
+		return nil, dirErr
 	}
-
 	dirPath = filepath.Clean(dirPath)
 
 	if dirInfo.IsDir() {
 		log.Info("Processing XML files in directory", "path", dirPath)
 		files, err := os.ReadDir(dirPath)
 		if err != nil {
-			log.Fatal(err)
+			return nil, err
 		}
 		for _, file := range files {
 			if strings.HasSuffix(file.Name(), ".xml") {
@@ -115,7 +172,10 @@ func main() {
 		log.Info("Processing XML file", "path", dirPath)
 		xmlFiles = append(xmlFiles, TargetFile{Path: dirPath})
 	}
+	return xmlFiles, nil
+}
 
+func processFilesConcurrently(xmlFiles []TargetFile) {
 	result := make(chan *TargetFile, len(xmlFiles))
 	defer func(res chan *TargetFile) {
 		for r := range res {
