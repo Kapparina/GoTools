@@ -129,19 +129,21 @@ func parseXlsxFile(path, targetSheet string) (output []byte, parseErr error) {
 			parseErr = err
 		}
 	}(file)
+
 	// Get the target sheet, or the default if no target was provided
-	var rows [][]string
-	var getRowsErr error
+	var rows *excelize.Rows
+	var rowsErr error
+
 	if len(targetSheet) > 1 {
-		rows, getRowsErr = file.GetRows(targetSheet)
+		rows, rowsErr = file.Rows(targetSheet)
 	} else {
-		rows, getRowsErr = file.GetRows(file.GetSheetName(0))
+		rows, rowsErr = file.Rows(file.GetSheetName(0))
 	}
-	if getRowsErr != nil {
-		return nil, getRowsErr
+	if rowsErr != nil {
+		return nil, rowsErr
 	}
 	// Marshal the data into XML
-	xmlOutput, marshalErr := xml.MarshalIndent(buildDataTable(&rows), "", "  ")
+	xmlOutput, marshalErr := xml.MarshalIndent(buildDataTable(rows), "", "  ")
 	if marshalErr != nil {
 		return nil, marshalErr
 	} else {
@@ -152,9 +154,6 @@ func parseXlsxFile(path, targetSheet string) (output []byte, parseErr error) {
 
 func cleanHeader(header *string) {
 	newHeader := *header
-	// if strings.ContainsAny(*header, " ") {
-	//     newHeader = cases.Title(language.English).String(newHeader)
-	// }
 	newHeader = FixXMLTags(newHeader)
 	*header = newHeader
 }
@@ -163,27 +162,34 @@ func cleanHeader(header *string) {
 // It skips the first row (schema row) and cleans the header row by removing spaces and special characters.
 // Each remaining row is converted into a DataRow, where each column value is mapped to a DataColumn in the DataRow.
 // The resulting DataTable is returned.
-func buildDataTable(rows *[][]string) DataTable {
+func buildDataTable(rows *excelize.Rows) DataTable {
 	var dataTable DataTable
+	var headerRow []string
+	var rowIndex int
 	if rows == nil {
 		return dataTable
 	}
-	for rowIndex := range *rows {
+	for rows.Next() {
+		columns, colErr := rows.Columns()
+		if colErr != nil {
+			return DataTable{}
+		}
 		if rowIndex == 0 {
-			headerRow := RenameDuplicates((*rows)[0], false)
+			headerRow = RenameDuplicates(columns, false)
 			for headerIndex := range headerRow {
 				cleanHeader(&headerRow[headerIndex])
 			}
 		} else {
 			var dataRow DataRow
-			for columnIndex := range (*rows)[rowIndex] {
-				columnName := (*rows)[0][columnIndex]
-				columnValue := convertToISO8601((*rows)[rowIndex][columnIndex])
+			for columnIndex := range columns {
+				columnName := headerRow[columnIndex]
+				columnValue := convertToISO8601(columns[columnIndex])
 				column := DataColumn{XMLName: xml.Name{Local: columnName}, Value: columnValue}
 				dataRow.Columns = append(dataRow.Columns, column)
 			}
 			dataTable.Rows = append(dataTable.Rows, dataRow)
 		}
+		rowIndex++
 	}
 	return dataTable
 }
