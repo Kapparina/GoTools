@@ -93,20 +93,6 @@ func main() {
 			processingErr = ErrMsg{Err: writeErr, Code: ErrStdout}
 		}
 	}
-	// // write output to xml file
-	// xmlFile, xmlFileErr := os.Create("output.xml")
-	// if xmlFileErr != nil {
-	//     processingErr = ErrMsg{Err: xmlFileErr, Code: ErrWriteFile}
-	// }
-	// defer func() {
-	//     if err := xmlFile.Close(); err != nil {
-	//         processingErr = ErrMsg{Err: err, Code: ErrWriteFile}
-	//     }
-	// }()
-	// _, writeErr := xmlFile.Write(output)
-	// if writeErr != nil {
-	//     processingErr = ErrMsg{Err: writeErr, Code: ErrWriteFile}
-	// }
 }
 
 // CheckExtension checks if the given file path has the specified extension.
@@ -192,6 +178,10 @@ func buildDataTable(rows *excelize.Rows) DataTable {
 				cleanHeader(&headerRow[headerIndex])
 			}
 		} else {
+			// Dirty workaround because `(*rows).Columns()` doesn't do what it says it does.
+			for len(columns) < len(headerRow) {
+				columns = append(columns, "")
+			}
 			var dataRow DataRow
 			for columnIndex := range columns {
 				columnName := headerRow[columnIndex]
