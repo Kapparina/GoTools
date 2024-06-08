@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 )
 
 // RenameDuplicates takes an input slice of strings and renames any duplicate headers
@@ -83,4 +84,42 @@ func FixXMLTags(tag string) string {
 	}
 	cleanTag = strings.ReplaceAll(cleanTag, " ", "_x0020_")
 	return cleanTag
+}
+
+// ConvertToISO8601 converts a given string value representing a date or time to ISO-8601 format.
+// It supports various date and time formats such as "MM-DD-YY", "MM-DD-YY HH:mm:ss", "1/02/06", etc.
+// The function iterates through the array of supported formats and attempts to parse the value using each format.
+// If a format successfully parses the value, it returns the parsed date in ISO-8601 format using time.DateTime layout.
+// If none of the formats can parse the value, it returns the original value.
+//
+// Example usage:
+//
+//	input := "12-25-20 12:34:56"
+//	result := convertToISO8601(input)
+//	fmt.Println(result)
+//	// Output: "2020-12-25T12:34:56"
+//
+//	input := "invalid date"
+//	result := convertToISO8601(input)
+//	fmt.Println(result)
+//	// Output: "invalid date"
+func ConvertToISO8601(value string) string {
+	formats := [9]string{
+		"01-02-06",
+		"01-02-06 15:04",
+		"01-02-06 15:04:05",
+		"1/02/06",
+		"1/02/06 15:04",
+		"1/02/06 15:04:05",
+		"01/02/06",
+		"01/02/06 15:04",
+		"01/02/06 15:04:05",
+	}
+	for _, format := range formats {
+		parsedDate, parseErr := time.Parse(format, value)
+		if parseErr == nil {
+			return parsedDate.Format(time.DateTime)
+		}
+	}
+	return value
 }

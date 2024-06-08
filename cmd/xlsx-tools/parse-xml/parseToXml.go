@@ -9,7 +9,6 @@ import (
 	"flag"
 	"os"
 	"strings"
-	"time"
 
 	. "GoTools/pkg/helpers"
 	"github.com/xuri/excelize/v2"
@@ -32,7 +31,7 @@ type DataTable struct {
 // It uses command line flags to get the user input, and falls back to standard input if no arguments are provided.
 // The function trims any leading/trailing whitespace from the file path.
 // It returns the file path, sheet name, and any input error encountered.
-func getInput() (filePath string, sheetName string, inputErr error) {
+func getInput() (filePath, sheetName string, inputErr error) {
 	flag.StringVar(&filePath, "path", "", "The path to the .xlsx file to parse")
 	flag.StringVar(&sheetName, "sheet", "", "The name of the worksheet to parse")
 	flag.Parse()
@@ -94,20 +93,6 @@ func main() {
 			processingErr = ErrMsg{Err: writeErr, Code: ErrStdout}
 		}
 	}
-	// // write output to xml file
-	// xmlFile, xmlFileErr := os.Create("output.xml")
-	// if xmlFileErr != nil {
-	//     processingErr = ErrMsg{Err: xmlFileErr, Code: ErrWriteFile}
-	// }
-	// defer func() {
-	//     if err := xmlFile.Close(); err != nil {
-	//         processingErr = ErrMsg{Err: err, Code: ErrWriteFile}
-	//     }
-	// }()
-	// _, writeErr := xmlFile.Write(output)
-	// if writeErr != nil {
-	//     processingErr = ErrMsg{Err: writeErr, Code: ErrWriteFile}
-	// }
 }
 
 // CheckExtension checks if the given file path has the specified extension.
@@ -129,19 +114,21 @@ func parseXlsxFile(path, targetSheet string) (output []byte, parseErr error) {
 			parseErr = err
 		}
 	}(file)
+
 	// Get the target sheet, or the default if no target was provided
-	var rows [][]string
-	var getRowsErr error
+	var rows *excelize.Rows
+	var rowsErr error
+
 	if len(targetSheet) > 1 {
-		rows, getRowsErr = file.GetRows(targetSheet)
+		rows, rowsErr = file.Rows(targetSheet)
 	} else {
-		rows, getRowsErr = file.GetRows(file.GetSheetName(0))
+		rows, rowsErr = file.Rows(file.GetSheetName(0))
 	}
-	if getRowsErr != nil {
-		return nil, getRowsErr
+	if rowsErr != nil {
+		return nil, rowsErr
 	}
 	// Marshal the data into XML
-	xmlOutput, marshalErr := xml.MarshalIndent(buildDataTable(&rows), "", "  ")
+	xmlOutput, marshalErr := xml.MarshalIndent(buildDataTable(rows), "", "  ")
 	if marshalErr != nil {
 		return nil, marshalErr
 	} else {
@@ -150,61 +137,61 @@ func parseXlsxFile(path, targetSheet string) (output []byte, parseErr error) {
 	return output, nil
 }
 
+// cleanHeader takes a pointer to a string `header` as input and modifies it.
+// It calls the FixXMLTags function to clean the `header`, replacing any invalid XML characters.
+// The modified `header` is then assigned back to the original pointer.
+// Example usage:
+//
+//	header := "<Hello World!>"
+//	cleanHeader(&header)
+//	fmt.Println(header)
+//	// Output: "Hello World"
 func cleanHeader(header *string) {
 	newHeader := *header
-	// if strings.ContainsAny(*header, " ") {
-	//     newHeader = cases.Title(language.English).String(newHeader)
-	// }
 	newHeader = FixXMLTags(newHeader)
 	*header = newHeader
 }
 
-// buildDataTable builds a DataTable from a 2D slice of strings.
-// It skips the first row (schema row) and cleans the header row by removing spaces and special characters.
-// Each remaining row is converted into a DataRow, where each column value is mapped to a DataColumn in the DataRow.
-// The resulting DataTable is returned.
-func buildDataTable(rows *[][]string) DataTable {
+// buildDataTable takes an excelize.Rows pointer as input and converts it into a DataTable struct.
+// It iterates over each row in the rows and converts each row into a DataRow struct.
+// If the rows pointer is nil, it returns an empty DataTable struct.
+// For the first row, it renames any duplicate headers using the RenameDuplicates function.
+// It then calls the cleanHeader function to clean each header.
+// For subsequent rows, it converts each column into a DataColumn struct and appends it to the DataRow struct.
+// The DataRow struct is then appended to the Rows field of the DataTable struct.
+// The function returns the populated DataTable struct.
+func buildDataTable(rows *excelize.Rows) DataTable {
 	var dataTable DataTable
+	var headerRow []string
+	var rowIndex int
 	if rows == nil {
 		return dataTable
 	}
-	for rowIndex := range *rows {
+	for rows.Next() {
+		columns, colErr := rows.Columns()
+		if colErr != nil {
+			return DataTable{}
+		}
 		if rowIndex == 0 {
-			headerRow := RenameDuplicates((*rows)[0], false)
+			headerRow = RenameDuplicates(columns, false)
 			for headerIndex := range headerRow {
 				cleanHeader(&headerRow[headerIndex])
 			}
 		} else {
+			// Dirty workaround because `(*rows).Columns()` doesn't do what it says it does.
+			for len(columns) < len(headerRow) {
+				columns = append(columns, "")
+			}
 			var dataRow DataRow
-			for columnIndex := range (*rows)[rowIndex] {
-				columnName := (*rows)[0][columnIndex]
-				columnValue := convertToISO8601((*rows)[rowIndex][columnIndex])
+			for columnIndex := range columns {
+				columnName := headerRow[columnIndex]
+				columnValue := ConvertToISO8601(columns[columnIndex])
 				column := DataColumn{XMLName: xml.Name{Local: columnName}, Value: columnValue}
 				dataRow.Columns = append(dataRow.Columns, column)
 			}
 			dataTable.Rows = append(dataTable.Rows, dataRow)
 		}
+		rowIndex++
 	}
 	return dataTable
-}
-
-func convertToISO8601(value string) string {
-	formats := [9]string{
-		"01-02-06",
-		"01-02-06 15:04",
-		"01-02-06 15:04:05",
-		"1/02/06",
-		"1/02/06 15:04",
-		"1/02/06 15:04:05",
-		"01/02/06",
-		"01/02/06 15:04",
-		"01/02/06 15:04:05",
-	}
-	for _, format := range formats {
-		parsedDate, parseErr := time.Parse(format, value)
-		if parseErr == nil {
-			return parsedDate.Format(time.DateTime)
-		}
-	}
-	return value
 }
